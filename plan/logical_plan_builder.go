@@ -17,6 +17,7 @@ import (
 	"fmt"
 
 	"github.com/juju/errors"
+	"github.com/ngaut/log"
 	"github.com/pingcap/tidb/ast"
 	"github.com/pingcap/tidb/expression"
 	"github.com/pingcap/tidb/model"
@@ -38,6 +39,7 @@ func (a *idAllocator) allocID() string {
 }
 
 func (b *planBuilder) buildAggregation(p LogicalPlan, aggFuncList []*ast.AggregateFuncExpr, gby []expression.Expression, correlated bool) LogicalPlan {
+	log.Infof("[agg] start")
 	agg := &Aggregation{
 		AggFuncs:        make([]expression.AggregationFunction, 0, len(aggFuncList)),
 		baseLogicalPlan: newBaseLogicalPlan(Agg, b.allocator)}
@@ -47,6 +49,7 @@ func (b *planBuilder) buildAggregation(p LogicalPlan, aggFuncList []*ast.Aggrega
 	schema := make([]*expression.Column, 0, len(aggFuncList))
 	for i, aggFunc := range aggFuncList {
 		var newArgList []expression.Expression
+		log.Warnf("[agg] fun:%v", aggFunc.F)
 		for _, arg := range aggFunc.Args {
 			newArg, np, correlated, err := b.rewrite(arg, p, nil, true)
 			if err != nil {
@@ -66,6 +69,7 @@ func (b *planBuilder) buildAggregation(p LogicalPlan, aggFuncList []*ast.Aggrega
 	}
 	agg.GroupByItems = gby
 	agg.SetSchema(schema)
+	log.Infof("[agg] end, schema:%v", agg.GetSchema().ToString())
 	return agg
 }
 
@@ -185,7 +189,9 @@ func splitCNFItems(onExpr expression.Expression) []expression.Expression {
 }
 
 func (b *planBuilder) buildNewJoin(join *ast.Join) LogicalPlan {
+	log.Infof("[join] start")
 	if join.Right == nil {
+		log.Infof("[join] end, right is nil")
 		return b.buildResultSetNode(join.Left)
 	}
 	leftPlan := b.buildResultSetNode(join.Left)
@@ -220,10 +226,12 @@ func (b *planBuilder) buildNewJoin(join *ast.Join) LogicalPlan {
 	}
 	addChild(joinPlan, leftPlan)
 	addChild(joinPlan, rightPlan)
+	log.Infof("[join] end, schema:%v, pid:%v", newSchema.ToString(), joinPlan.id)
 	return joinPlan
 }
 
 func (b *planBuilder) buildSelection(p LogicalPlan, where ast.ExprNode, AggMapper map[*ast.AggregateFuncExpr]int) LogicalPlan {
+	log.Infof("[selection] start")
 	conditions := splitWhere(where)
 	expressions := make([]expression.Expression, 0, len(conditions))
 	selection := &Selection{baseLogicalPlan: newBaseLogicalPlan(Sel, b.allocator)}
@@ -247,11 +255,13 @@ func (b *planBuilder) buildSelection(p LogicalPlan, where ast.ExprNode, AggMappe
 	selection.Conditions = expressions
 	selection.SetSchema(p.GetSchema().DeepCopy())
 	addChild(selection, p)
+	log.Infof("[selection] end, schema:%v, pid:%v", selection.GetSchema().ToString(), selection.id)
 	return selection
 }
 
 // buildProjection returns a Projection plan and non-aux columns length.
 func (b *planBuilder) buildProjection(p LogicalPlan, fields []*ast.SelectField, mapper map[*ast.AggregateFuncExpr]int) (LogicalPlan, int) {
+	log.Infof("[projection] start, schema:%v", p.GetSchema().ToString())
 	proj := &Projection{
 		Exprs:           make([]expression.Expression, 0, len(fields)),
 		baseLogicalPlan: newBaseLogicalPlan(Proj, b.allocator),
@@ -272,6 +282,7 @@ func (b *planBuilder) buildProjection(p LogicalPlan, fields []*ast.SelectField, 
 		var tblName, colName model.CIStr
 		if field.AsName.L != "" {
 			colName = field.AsName
+			// why don't need tblName?
 		} else if c, ok := newExpr.(*expression.Column); ok && !c.IsAggOrSubq {
 			colName = c.ColName
 			tblName = c.TblName
@@ -285,10 +296,12 @@ func (b *planBuilder) buildProjection(p LogicalPlan, fields []*ast.SelectField, 
 				colName = model.NewCIStr(field.Text())
 			}
 		}
+		log.Warnf("[projection] field:%v, auxiliary:%v, col:%v", field.Text(), field.Auxiliary, colName)
 		schemaCol := &expression.Column{
 			FromID:  proj.id,
 			TblName: tblName,
 			ColName: colName,
+			// why use newExpr type?
 			RetType: newExpr.GetType(),
 		}
 		if !field.Auxiliary {
@@ -299,6 +312,7 @@ func (b *planBuilder) buildProjection(p LogicalPlan, fields []*ast.SelectField, 
 	}
 	proj.SetSchema(schema)
 	addChild(proj, p)
+	log.Infof("[projection] end, schema:%v, pid:%v, oldLen:%v", schema.ToString(), proj.id, oldLen)
 	return proj, oldLen
 }
 
@@ -724,6 +738,7 @@ func (b *planBuilder) unfoldWildStar(p LogicalPlan, selectFields []*ast.SelectFi
 }
 
 func (b *planBuilder) buildNewSelect(sel *ast.SelectStmt) LogicalPlan {
+	log.Infof("[select] start")
 	hasAgg := b.detectSelectAgg(sel)
 	var (
 		p                             LogicalPlan
@@ -733,6 +748,7 @@ func (b *planBuilder) buildNewSelect(sel *ast.SelectStmt) LogicalPlan {
 		gbyCols                       []expression.Expression
 	)
 	if sel.From != nil {
+		log.Warnf("[select] from:%v", sel.From.TableRefs)
 		p = b.buildResultSetNode(sel.From.TableRefs)
 	} else {
 		p = b.buildNewTableDual()
@@ -803,6 +819,7 @@ func (b *planBuilder) buildNewSelect(sel *ast.SelectStmt) LogicalPlan {
 	if oldLen != len(p.GetSchema()) {
 		return b.buildTrim(p, oldLen)
 	}
+	log.Infof("[select] end, schema:%v", p.GetSchema().ToString())
 	return p
 }
 
@@ -827,6 +844,7 @@ func (b *planBuilder) getTableStats(table *model.TableInfo) *statistics.Table {
 }
 
 func (b *planBuilder) buildDataSource(tn *ast.TableName) LogicalPlan {
+	log.Infof("[datasource] start")
 	statisticTable := b.getTableStats(tn.TableInfo)
 	if b.err != nil {
 		return nil
@@ -834,6 +852,7 @@ func (b *planBuilder) buildDataSource(tn *ast.TableName) LogicalPlan {
 	p := &DataSource{
 		table:           tn,
 		Table:           tn.TableInfo,
+		DBName:          &tn.DBInfo.Name,
 		baseLogicalPlan: newBaseLogicalPlan(Ts, b.allocator),
 		statisticTable:  statisticTable,
 	}
@@ -842,7 +861,6 @@ func (b *planBuilder) buildDataSource(tn *ast.TableName) LogicalPlan {
 	rfs := tn.GetResultFields()
 	schema := make([]*expression.Column, 0, len(rfs))
 	for i, rf := range rfs {
-		p.DBName = &rf.DBName
 		p.Columns = append(p.Columns, rf.Column)
 		schema = append(schema, &expression.Column{
 			FromID:   p.id,
@@ -853,6 +871,7 @@ func (b *planBuilder) buildDataSource(tn *ast.TableName) LogicalPlan {
 			Position: i})
 	}
 	p.SetSchema(schema)
+	log.Infof("[datasource] end, schema:%v, pid:%v", p.GetSchema().ToString(), p.id)
 	return p
 }
 

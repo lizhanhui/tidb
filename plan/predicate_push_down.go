@@ -47,6 +47,7 @@ func columnSubstitute(expr expression.Expression, schema expression.Schema, newE
 
 // PredicatePushDown implements LogicalPlan PredicatePushDown interface.
 func (p *Selection) PredicatePushDown(predicates []expression.Expression) (ret []expression.Expression, retP LogicalPlan, err error) {
+	log.Infof("[predicate push down] selection start")
 	conditions := p.Conditions
 	retConditions, child, err1 := p.GetChildByIndex(0).(LogicalPlan).PredicatePushDown(append(conditions, predicates...))
 	if err1 != nil {
@@ -62,6 +63,7 @@ func (p *Selection) PredicatePushDown(predicates []expression.Expression) (ret [
 		}
 		retP = child
 	}
+	log.Infof("[predicate push down] selection end")
 	return
 }
 
@@ -130,6 +132,7 @@ func (p *Join) PredicatePushDown(predicates []expression.Expression) (ret []expr
 
 // PredicatePushDown implements LogicalPlan PredicatePushDown interface.
 func (p *Projection) PredicatePushDown(predicates []expression.Expression) (ret []expression.Expression, retPlan LogicalPlan, err error) {
+	log.Infof("[predicate push down] projection start")
 	retPlan = p
 	var push []expression.Expression
 	for _, cond := range predicates {
@@ -159,6 +162,7 @@ func (p *Projection) PredicatePushDown(predicates []expression.Expression) (ret 
 			return nil, nil, errors.Trace(err1)
 		}
 	}
+	log.Infof("[predicate push down] projection end")
 	return
 }
 
@@ -185,7 +189,9 @@ func (p *NewUnion) PredicatePushDown(predicates []expression.Expression) (ret []
 // PredicatePushDown implements LogicalPlan PredicatePushDown interface.
 func (p *Aggregation) PredicatePushDown(predicates []expression.Expression) ([]expression.Expression, LogicalPlan, error) {
 	// TODO: implement aggregation push down.
+	log.Infof("[predicate push down] agg start")
 	p.GetChildByIndex(0).(LogicalPlan).PredicatePushDown(nil)
+	log.Infof("[predicate push down] agg end")
 	return predicates, p, nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/juju/errors"
+	"github.com/ngaut/log"
 	"github.com/pingcap/tidb/ast"
 	"github.com/pingcap/tidb/context"
 	"github.com/pingcap/tidb/evaluator"
@@ -24,6 +25,7 @@ var EvalSubquery func(p PhysicalPlan, is infoschema.InfoSchema, ctx context.Cont
 // asScalar means whether this expression must be treated as a scalar expression.
 func (b *planBuilder) rewrite(expr ast.ExprNode, p LogicalPlan, aggMapper map[*ast.AggregateFuncExpr]int, asScalar bool) (
 	newExpr expression.Expression, newPlan LogicalPlan, correlated bool, err error) {
+	log.Infof("[rewrite] start, origin expr:%v", expr)
 	er := &expressionRewriter{
 		p:        p,
 		aggrMap:  aggMapper,
@@ -44,6 +46,7 @@ func (b *planBuilder) rewrite(expr ast.ExprNode, p LogicalPlan, aggMapper map[*a
 	if getRowLen(er.ctxStack[0]) != 1 {
 		return nil, nil, false, errors.New("Operand should contain 1 column(s)")
 	}
+	log.Infof("[rewrite] end, correlated:%v", er.correlated)
 	return er.ctxStack[0], er.p, er.correlated, nil
 }
 
@@ -99,6 +102,7 @@ func constructBinaryOpFunction(l expression.Expression, r expression.Expression,
 }
 
 func (er *expressionRewriter) buildSubquery(subq *ast.SubqueryExpr) (LogicalPlan, expression.Schema) {
+	log.Warnf("[subquery] start")
 	outerSchema := er.schema.DeepCopy()
 	for _, col := range outerSchema {
 		col.Correlated = true
@@ -110,6 +114,7 @@ func (er *expressionRewriter) buildSubquery(subq *ast.SubqueryExpr) (LogicalPlan
 		er.err = errors.Trace(er.b.err)
 		return nil, nil
 	}
+	log.Warnf("[subquery] end, schema:%v", outerSchema.ToString())
 	return np, outerSchema
 }
 
@@ -125,10 +130,12 @@ func (er *expressionRewriter) Enter(inNode ast.Node) (ast.Node, bool) {
 			er.err = errors.New("Can't appear aggrFunctions")
 			return inNode, true
 		}
+		log.Warnf("[rewriter] agg expr:%v", er.schema[index])
 		er.ctxStack = append(er.ctxStack, er.schema[index])
 		return inNode, true
 	case *ast.ColumnNameExpr:
 		if index, ok := er.b.colMapper[v]; ok {
+			log.Warnf("[rewriter] column name expr:%v", er.schema[index])
 			er.ctxStack = append(er.ctxStack, er.schema[index])
 			return inNode, true
 		}
@@ -758,6 +765,7 @@ func (er *expressionRewriter) toColumn(v *ast.ColumnName) {
 		er.err = errors.Trace(err)
 		return
 	}
+	log.Warnf("[rewriter] column expr %v to col %v", v, column)
 	if column != nil {
 		er.ctxStack = append(er.ctxStack, column)
 		return
@@ -779,6 +787,7 @@ func (er *expressionRewriter) toColumn(v *ast.ColumnName) {
 		er.err = errors.Errorf("Unknown column %s %s %s.", v.Schema.L, v.Table.L, v.Name.L)
 		return
 	}
+	log.Warnf("[rewriter] column expr to outer schema col:%v", column)
 	er.ctxStack = append(er.ctxStack, column)
 }
 

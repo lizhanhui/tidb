@@ -26,6 +26,7 @@ import (
 // Optimize does optimization and creates a Plan.
 // The node must be prepared first.
 func Optimize(ctx context.Context, node ast.Node, sb SubQueryBuilder, is infoschema.InfoSchema) (Plan, error) {
+	log.Info("[optimize] start")
 	// We have to infer type again because after parameter is set, the expression type may change.
 	if err := InferType(node); err != nil {
 		return nil, errors.Trace(err)
@@ -40,6 +41,7 @@ func Optimize(ctx context.Context, node ast.Node, sb SubQueryBuilder, is infosch
 		colMapper: make(map[*ast.ColumnNameExpr]int),
 		allocator: new(idAllocator)}
 	p := builder.build(node)
+	log.Errorf("[optimize] original plan:%s end", ToString(p))
 	if builder.err != nil {
 		return nil, errors.Trace(builder.err)
 	}
@@ -59,12 +61,14 @@ func Optimize(ctx context.Context, node ast.Node, sb SubQueryBuilder, is infosch
 		}
 		p = res.p.PushLimit(nil)
 		log.Debugf("[PLAN] %s", ToString(p))
+		log.Errorf("[optimize] new plan:%s end", ToString(p))
 		return p, nil
 	}
 	err := Refine(p)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
+	log.Infof("[optimize] old plan:%s end", ToString(p))
 	return p, nil
 }
 
